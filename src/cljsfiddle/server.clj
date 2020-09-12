@@ -1,6 +1,5 @@
 (ns cljsfiddle.server
-  (:require [clojure.tools.namespace.find :as ns.find]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.edn :as edn]
             [ring.adapter.jetty :as jetty]
@@ -22,21 +21,40 @@
     (with-open [stream (.getInputStream sandbox entry)]
       (slurp stream))))
 
+;; TODO: these are very hacky - implement something cleaner...
+(defn unpack-goog-require1 [s]
+  (let [[x y & xs] (str/split (str s) #"\.")]
+    (sym->classpath (str/join "." (into [x y y] (map str/lower-case xs))))))
+
+(defn unpack-goog-require2 [s]
+  (let [[x y & xs] (str/split (str s) #"\.")]
+    (sym->classpath (str/join "." (into [x y] (map str/lower-case xs))))))
+
 (defn load-source
   [version {:keys [name macros]}]
   (when-let [sandbox ^JarFile (get sandbox version)]
-    (let [entries (set (ns.find/sources-in-jar sandbox (if macros ns.find/clj ns.find/cljs)))
+    (let [entries (into #{} (map str) (iterator-seq (.entries sandbox)))
           entry   (sym->classpath name)]
-      (when-let [entry (if macros
-                         (or (entries (str entry ".clj"))
-                             (entries (str entry ".cljc")))
-                         (or (entries (str entry ".cljs"))
-                             (entries (str entry ".cljc"))))]
+      (if-let [entry (if macros
+                       (or (entries (str entry ".clj"))
+                           (entries (str entry ".cljc")))
+                       (or (entries (str entry ".cljs"))
+                           (entries (str entry ".cljc"))))]
         (with-open [stream (.getInputStream sandbox (.getEntry sandbox entry))]
           {:source (slurp stream)
            :lang   :clj
            :cache  (when-not macros
-                     (try-read-cache sandbox name))})))))
+                     (try-read-cache sandbox name))})
+        (when-not macros
+          (if-let [entry (or (entries (str entry ".js"))
+                               (entries (str (unpack-goog-require1 name) ".js"))
+                               (entries (str (unpack-goog-require2 name) ".js")))]
+            (with-open [stream (.getInputStream sandbox (.getEntry sandbox entry))]
+              {:source (slurp stream)
+               :lang   :js})))))))
+
+(def load-source-mz
+  (memoize load-source))
 
 (defmulti rpc :request)
 
@@ -44,9 +62,9 @@
   {:status 404})
 
 (defmethod rpc :env/load [{:keys [sandbox/version opts]}]
-  (if-let [resp (load-source version opts)]
-    {:status 200
-     :body (pr-str resp)
+  (if-let [resp (load-source-mz version opts)]
+    {:status  200
+     :body    (pr-str resp)
      :headers {"Content-Type" "application/edn"}}
     {:status 404}))
 
