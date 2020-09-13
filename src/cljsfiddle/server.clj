@@ -3,7 +3,8 @@
             [clojure.string :as str]
             [clojure.edn :as edn]
             [ring.adapter.jetty :as jetty]
-            [ring.middleware.cors :refer [wrap-cors]])
+            [ring.middleware.cors :refer [wrap-cors]]
+            [reitit.ring :as ring])
   (:import (java.net URL)
            (java.util.jar JarFile)))
 
@@ -94,7 +95,7 @@
     {:status 404}))
 
 (defn respond-with-manifest
-  [{:keys [sandboxes]}]
+  [{:keys [sandboxes]} _]
   {:status  200
    :headers {"Content-Type" "application/edn"}
    :body    (->> sandboxes
@@ -103,17 +104,22 @@
                  (into {})
                  (pr-str))})
 
-(defn handler
-  [ctx req]
-  (case (:request-method req)
-    :post (rpc ctx (-> req :body slurp edn/read-string))
-    :get  (respond-with-manifest ctx)
-    {:status 405}))
+(defn response-with-readme [_]
+  {:status  200
+   :headers {"Content-Type" "text/plain"}
+   :body    (slurp (io/resource "readme.cljs"))})
+
+(defn handler [ctx]
+  (ring/ring-handler
+   (ring/router
+    [["/rpc" {:post {:handler #(rpc ctx (-> % :body slurp edn/read-string))}}]
+     ["/manifest" {:get {:handler (partial respond-with-manifest ctx)}}]
+     ["/readme" {:get {:handler response-with-readme}}]])))
 
 (defn -main [& _]
   (let [ctx {:sandboxes (sandboxes)}]
     (jetty/run-jetty
-     (wrap-cors (partial handler ctx)
+     (wrap-cors (handler ctx)
                 :access-control-allow-origin [#".*"]
                 :access-control-allow-methods [:get :post])
      {:port 3000 :join? false})))
