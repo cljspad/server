@@ -4,10 +4,33 @@
             [clojure.edn :as edn]
             [ring.adapter.jetty :as jetty]
             [ring.middleware.cors :refer [wrap-cors]])
-  (:import (java.util.jar JarFile)))
+  (:import (java.net URL)
+           (java.util.jar JarFile)))
 
-(def sandbox
-  {"1" (JarFile. (io/file "/Users/thomascrowley/Code/clojure/sandbox/target/sandbox-1.0.0-standalone.jar"))})
+(defn read-manifest [^JarFile sandbox]
+  (when-let [entry (.getEntry sandbox "cljsfiddle.manifest.edn")]
+    (with-open [stream (.getInputStream sandbox entry)]
+      (edn/read-string (slurp stream)))))
+
+(defn sandboxes []
+  (->> (io/resource "sandbox")
+       (io/file)
+       (file-seq)
+       (map str)
+       (filter #(str/ends-with? % ".jar"))
+       (map #(last (str/split % #"/")))
+       (map #(str "sandbox/" %))
+       (map io/resource)
+       (map (fn [^URL resource]
+              (let [jar-file (JarFile. (io/file resource))]
+                ;; TODO: spec validation over manifest edn
+                {:resource resource
+                 :jar-file jar-file
+                 :manifest (read-manifest jar-file)})))
+       (group-by #(-> % :manifest :sandbox/version))
+       (map (fn [[version [sandbox]]]
+              [version sandbox]))
+       (into {})))
 
 (defn sym->classpath [sym]
   (-> sym
@@ -30,10 +53,13 @@
   (let [[x y & xs] (str/split (str s) #"\.")]
     (sym->classpath (str/join "." (into [x y] (map str/lower-case xs))))))
 
+(defn entries [^JarFile sandbox]
+  (into #{} (map str) (iterator-seq (.entries sandbox))))
+
 (defn load-source
-  [version {:keys [name macros]}]
-  (when-let [sandbox ^JarFile (get sandbox version)]
-    (let [entries (into #{} (map str) (iterator-seq (.entries sandbox)))
+  [sandboxes version {:keys [name macros]}]
+  (when-let [sandbox ^JarFile (get-in sandboxes [version :jar-file])]
+    (let [entries (entries sandbox)
           entry   (sym->classpath name)]
       (if-let [entry (if macros
                        (or (entries (str entry ".clj"))
@@ -53,33 +79,44 @@
               {:source (slurp stream)
                :lang   :js})))))))
 
-(def load-source-mz
-  (memoize load-source))
 
-(defmulti rpc :request)
+(defmulti rpc (fn [_ctx req] (:request req)))
 
-(defmethod rpc :default [_]
+(defmethod rpc :default [_ _]
   {:status 404})
 
-(defmethod rpc :env/load [{:keys [sandbox/version opts]}]
-  (if-let [resp (load-source-mz version opts)]
+(defmethod rpc :env/load [{:keys [sandboxes]} {:keys [sandbox/version opts]}]
+  ;; TODO: memoize response
+  (if-let [resp (load-source sandboxes version opts)]
     {:status  200
      :body    (pr-str resp)
      :headers {"Content-Type" "application/edn"}}
     {:status 404}))
 
+(defn respond-with-manifest
+  [{:keys [sandboxes]}]
+  {:status  200
+   :headers {"Content-Type" "application/edn"}
+   :body    (->> sandboxes
+                 (map (fn [[id {:keys [manifest]}]]
+                        [id manifest]))
+                 (into {})
+                 (pr-str))})
+
 (defn handler
-  [req]
-  (if (= :post (:request-method req))
-    (rpc (-> req :body slurp edn/read-string))
+  [ctx req]
+  (case (:request-method req)
+    :post (rpc ctx (-> req :body slurp edn/read-string))
+    :get  (respond-with-manifest ctx)
     {:status 405}))
 
 (defn -main [& _]
-  (jetty/run-jetty
-   (wrap-cors handler
-              :access-control-allow-origin [#".*"]
-              :access-control-allow-methods [:get :post])
-   {:port 3000 :join? false}))
+  (let [ctx {:sandboxes (sandboxes)}]
+    (jetty/run-jetty
+     (wrap-cors (partial handler ctx)
+                :access-control-allow-origin [#".*"]
+                :access-control-allow-methods [:get :post])
+     {:port 3000 :join? false})))
 
 (comment
  (load-source "1" {:name 'reagent.debug :macros true}))

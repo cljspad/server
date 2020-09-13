@@ -1,5 +1,6 @@
 target/
 .idea/
-resources/
+resources/sandbox/
 *.iml
 .nrepl-port
+
