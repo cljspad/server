@@ -1,7 +1,9 @@
 (ns user
   (:require [cljsfiddle.server]
+            [clojure.string :as str]
             [integrant.core :as ig]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io])
+  (:import (java.io File)))
 
 (defonce system
   (atom nil))
@@ -9,8 +11,8 @@
 (defmethod ig/init-key :dev/sandboxes
   [_ {:keys [path]}]
   (let [read-file (fn [file]
-                    (let [file (io/file path "resources" "public" file)]
-                      (when (.exists file)
+                    (let [file (apply io/file path "resources" "public" (str/split file #"/"))]
+                      (when (.exists ^File file)
                         {:Body (slurp file)})))
         read-src  (comp :Body read-file)]
     {"dev" {:read-file read-file
