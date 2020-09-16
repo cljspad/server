@@ -1,36 +1,38 @@
 (ns cljsfiddle.server
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.edn :as edn]
             [ring.adapter.jetty :as jetty]
-            [ring.middleware.cors :refer [wrap-cors]]
-            [reitit.ring :as ring])
-  (:import (java.net URL)
-           (java.util.jar JarFile)))
+            [ring.middleware.defaults :refer [wrap-defaults]]
+            [reitit.ring :as ring]
+            [cognitect.aws.client.api :as aws]
+            [integrant.core :as ig])
+  (:import (java.util.concurrent CountDownLatch)
+           (org.eclipse.jetty.server Server)
+           (org.eclipse.jetty.server.handler.gzip GzipHandler)))
 
-(defn read-manifest [^JarFile sandbox]
-  (when-let [entry (.getEntry sandbox "cljsfiddle.manifest.edn")]
-    (with-open [stream (.getInputStream sandbox entry)]
-      (edn/read-string (slurp stream)))))
+(defn read-file [client bucket sandbox file]
+  (let [resp (aws/invoke client {:op      :GetObject
+                                 :request {:Bucket bucket
+                                           :Key    (str sandbox "/" file)}})]
+    (when-not (:cognitect.anomalies/category resp)
+      (update resp :Body slurp))))
 
-(defn sandboxes []
-  (->> (io/resource "sandbox")
-       (io/file)
-       (file-seq)
-       (map str)
-       (filter #(str/ends-with? % ".jar"))
-       (map #(last (str/split % #"/")))
-       (map #(str "sandbox/" %))
-       (map io/resource)
-       (map (fn [^URL resource]
-              (let [jar-file (JarFile. (io/file resource))]
-                ;; TODO: spec validation over manifest edn
-                {:resource resource
-                 :jar-file jar-file
-                 :manifest (read-manifest jar-file)})))
-       (group-by #(-> % :manifest :sandbox/version))
-       (map (fn [[version [sandbox]]]
-              [version sandbox]))
+(defn ->sandbox [client bucket sandbox]
+  (let [read-file (partial read-file client bucket sandbox)
+        read-src  (comp :Body read-file)]
+    (when-let [manifest (some-> (read-file "cljsfiddle.manifest.edn") edn/read-string)]
+      [sandbox {:manifest  manifest
+                :read-src  (memoize read-src)
+                :read-file (memoize read-file)}])))
+
+(defn sandboxes [client bucket]
+  (->> (aws/invoke client {:op      :ListObjectsV2
+                           :request {:Bucket bucket}})
+       :Contents
+       (map :Key)
+       (filter #(str/ends-with? % "/"))
+       (map #(str/replace % "/" ""))
+       (map (partial ->sandbox client bucket))
        (into {})))
 
 (defn sym->classpath [sym]
@@ -38,12 +40,6 @@
       name
       (str/replace "." "/")
       (str/replace "-" "_")))
-
-(defn try-read-cache [^JarFile sandbox name]
-  (when-let [entry (or (.getEntry sandbox (format "cljsfiddle/%s.cljs.cache.json" (sym->classpath name)))
-                       (.getEntry sandbox (format "cljsfiddle/%s.cljc.cache.json" (sym->classpath name))))]
-    (with-open [stream (.getInputStream sandbox entry)]
-      (slurp stream))))
 
 ;; TODO: these are very hacky - implement something cleaner...
 (defn unpack-goog-require1 [s]
@@ -54,32 +50,45 @@
   (let [[x y & xs] (str/split (str s) #"\.")]
     (sym->classpath (str/join "." (into [x y] (map str/lower-case xs))))))
 
-(defn entries [^JarFile sandbox]
-  (into #{} (map str) (iterator-seq (.entries sandbox))))
+(defn unpack-goog-require3 [s]
+  (let [[x y & xs] (str/split (str s) #"\.")]
+    (sym->classpath (str/join "." (into [x (str/lower-case y) (str/lower-case y)] (map str/lower-case xs))))))
+
+(defn try-read-cache
+  [{:keys [read-src]} name]
+  (or (read-src (format "cljsfiddle/%s.cljs.cache.json" (sym->classpath name)))
+      (read-src (format "cljsfiddle/%s.cljc.cache.json" (sym->classpath name)))))
+
+(defn read-clj
+  [{:keys [read-src] :as sandbox} {:keys [macros name]} entry]
+  (when-let [src (read-src entry)]
+    {:source src
+     :lang   :clj
+     :cache  (when-not macros
+               (try-read-cache sandbox name))}))
+
+(defn read-js
+  [{:keys [read-src]} entry]
+  (when-let [src (read-src entry)]
+    {:source src
+     :lang   :js}))
 
 (defn load-source
-  [sandboxes version {:keys [name macros]}]
-  (when-let [sandbox ^JarFile (get-in sandboxes [version :jar-file])]
-    (let [entries (entries sandbox)
-          entry   (sym->classpath name)]
-      (if-let [entry (if macros
-                       (or (entries (str entry ".clj"))
-                           (entries (str entry ".cljc")))
-                       (or (entries (str entry ".cljs"))
-                           (entries (str entry ".cljc"))))]
-        (with-open [stream (.getInputStream sandbox (.getEntry sandbox entry))]
-          {:source (slurp stream)
-           :lang   :clj
-           :cache  (when-not macros
-                     (try-read-cache sandbox name))})
-        (when-not macros
-          (if-let [entry (or (entries (str entry ".js"))
-                               (entries (str (unpack-goog-require1 name) ".js"))
-                               (entries (str (unpack-goog-require2 name) ".js")))]
-            (with-open [stream (.getInputStream sandbox (.getEntry sandbox entry))]
-              {:source (slurp stream)
-               :lang   :js})))))))
-
+  [sandboxes version {:keys [name macros] :as opts}]
+  (when-let [sandbox (get sandboxes version)]
+    (let [entry    (sym->classpath name)
+          read-js  (partial read-js sandbox)
+          read-clj (partial read-clj sandbox opts)]
+      (if macros
+        (or (read-js (str "cljsfiddle/" entry ".js"))
+            (read-clj (str "cljsfiddle/" entry ".cljc")))
+        (or (read-clj (str "cljsfiddle/" entry ".cljs"))
+            (read-clj (str "cljsfiddle/" entry ".cljc"))
+            (read-js (str "cljsfiddle/" entry ".js"))
+            (read-js (str entry ".js"))
+            (read-js (str (unpack-goog-require1 name) ".js"))
+            (read-js (str (unpack-goog-require2 name) ".js"))
+            (read-js (str (unpack-goog-require3 name) ".js")))))))
 
 (defmulti rpc (fn [_ctx req] (:request req)))
 
@@ -87,42 +96,101 @@
   {:status 404})
 
 (defmethod rpc :env/load [{:keys [sandboxes]} {:keys [sandbox/version opts]}]
-  ;; TODO: memoize response
   (if-let [resp (load-source sandboxes version opts)]
     {:status  200
      :body    (pr-str resp)
      :headers {"Content-Type" "application/edn"}}
     {:status 404}))
 
-(defn respond-with-manifest
-  [{:keys [sandboxes]} _]
-  {:status  200
-   :headers {"Content-Type" "application/edn"}
-   :body    (->> sandboxes
-                 (map (fn [[id {:keys [manifest]}]]
-                        [id manifest]))
-                 (into {})
-                 (pr-str))})
+(defn s3-handler
+  [{:keys [sandboxes]} req]
+  (when-let [version (get-in req [:path-params :version])]
+    (when-let [read-file (get-in sandboxes [version :read-file])]
+      (when-let [resp (read-file (subs (:uri req) (count (str "/sandbox/" version "/"))))]
+        {:status  200
+         :body    (:Body resp)
+         :headers {"Content-Type"   (:ContentType resp)
+                   "Content-Length" (:ContentLength resp)
+                   "Last-Modified"  (:LastModified resp)
+                   "ETag"           (:Etag resp)}}))))
 
-(defn response-with-readme [_]
-  {:status  200
-   :headers {"Content-Type" "text/plain"}
-   :body    (slurp (io/resource "readme.cljs"))})
+(defn s3-handler-latest
+  [{:keys [latest-sandbox] :as ctx} req]
+  (s3-handler ctx (assoc-in req [:path-params :version] latest-sandbox)))
 
-(defn handler [ctx]
+(defn s3-handler-latest-index
+  [ctx req]
+  (s3-handler-latest ctx (update req :uri str "/index.html")))
+
+(defn handler
+  [ctx]
   (ring/ring-handler
    (ring/router
-    [["/rpc" {:post {:handler #(rpc ctx (-> % :body slurp edn/read-string))}}]
-     ["/manifest" {:get {:handler (partial respond-with-manifest ctx)}}]
-     ["/readme" {:get {:handler response-with-readme}}]])))
+    [["/api/:version/rpc" {:post {:handler #(rpc ctx (-> % :body slurp edn/read-string))}}]
+     ["/sandbox/:version" {:get {:handler (partial s3-handler-latest-index ctx)}}]
+     ["/sandbox/:version/*" {:get {:handler (partial s3-handler ctx)}}]
+     ;["/*" {:get {:handler (partial s3-handler-latest ctx)}}]
+     ])))
+
+(defmethod ig/init-key :s3/client
+  [_ {:keys [region]}]
+  (aws/client {:api :s3 :region region}))
+
+(defmethod ig/init-key :s3/sandboxes
+  [_ {:keys [client bucket]}]
+  (sandboxes client bucket))
+
+(defmethod ig/init-key :s3/sandbox-latest
+  [_ {:keys [sandboxes]}]
+  (->> sandboxes keys sort last))
+
+(defmethod ig/init-key :ring/handler
+  [_ {:keys [ctx]}]
+  (handler ctx))
+
+(defn jetty-configurator
+  [^Server server]
+  (let [content-types ["text/css"
+                       "text/plain"
+                       "text/javascript"
+                       "application/javascript"
+                       "application/edn"
+                       "image/svg+xml"]
+        gzip-handler  (doto (GzipHandler.)
+                        (.setIncludedMimeTypes (into-array String content-types))
+                        (.setMinGzipSize 1024)
+                        (.setHandler (.getHandler server)))]
+    (.setHandler server gzip-handler)))
+
+(defmethod ig/init-key :ring/server
+  [_ {:keys [handler port]}]
+  (jetty/run-jetty (wrap-defaults handler {})
+                   {:port         port
+                    :join?        false
+                    :configurator jetty-configurator}))
+
+(defmethod ig/halt-key! :ring/server
+  [_ ^Server server]
+  (.stop server))
+
+(defn prod-config []
+  {:s3/client         {:region (System/getenv "S3_REGION")}
+   :s3/sandboxes      {:client (ig/ref :s3/client)
+                       :bucket (System/getenv "S3_BUCKET")}
+   :s3/sandbox-latest {:sandboxes (ig/ref :s3/sandboxes)}
+   :ring/handler      {:ctx {:sandboxes      (ig/ref :s3/sandboxes)
+                             :latest-sandbox (ig/ref :s3/sandbox-latest)}}
+   :ring/server       {:handler (ig/ref :ring/handler)
+                       :port    (System/getenv "PORT")}})
 
 (defn -main [& _]
-  (let [ctx {:sandboxes (sandboxes)}]
-    (jetty/run-jetty
-     (wrap-cors (handler ctx)
-                :access-control-allow-origin [#".*"]
-                :access-control-allow-methods [:get :post])
-     {:port 3000 :join? false})))
-
-(comment
- (load-source "1" {:name 'reagent.debug :macros true}))
+  (try
+    (let [system (ig/init (prod-config))
+          latch  (CountDownLatch. 1)]
+      (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (.countDown latch))))
+      (.await latch)
+      (ig/halt! system)
+      (System/exit 0))
+    (catch Throwable e
+      (.printStackTrace e)
+      (System/exit 1))))
