@@ -1,8 +1,7 @@
 (ns user
   (:require [cljsfiddle.server]
             [integrant.core :as ig]
-            [clojure.java.io :as io]
-            [clojure.edn :as edn]))
+            [clojure.java.io :as io]))
 
 (defonce system
   (atom nil))
@@ -14,8 +13,7 @@
                       (when (.exists file)
                         {:Body (slurp file)})))
         read-src  (comp :Body read-file)]
-    {"dev" {:manifest  (edn/read-string (slurp (io/file path "resources" "public" "cljsfiddle.manifest.edn")))
-            :read-file read-file
+    {"dev" {:read-file read-file
             :read-src  read-src}}))
 
 (defn config [cljsfiddle-path]

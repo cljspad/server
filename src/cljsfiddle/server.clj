@@ -8,7 +8,8 @@
             [integrant.core :as ig])
   (:import (java.util.concurrent CountDownLatch)
            (org.eclipse.jetty.server Server)
-           (org.eclipse.jetty.server.handler.gzip GzipHandler)))
+           (org.eclipse.jetty.server.handler.gzip GzipHandler))
+  (:gen-class))
 
 (defn read-file [client bucket sandbox file]
   (let [resp (aws/invoke client {:op      :GetObject
@@ -20,10 +21,8 @@
 (defn ->sandbox [client bucket sandbox]
   (let [read-file (partial read-file client bucket sandbox)
         read-src  (comp :Body read-file)]
-    (when-let [manifest (some-> (read-file "cljsfiddle.manifest.edn") edn/read-string)]
-      [sandbox {:manifest  manifest
-                :read-src  (memoize read-src)
-                :read-file (memoize read-file)}])))
+    [sandbox {:read-src  (memoize read-src)
+              :read-file (memoize read-file)}]))
 
 (defn sandboxes [client bucket]
   (->> (aws/invoke client {:op      :ListObjectsV2
@@ -173,7 +172,7 @@
   [_ ^Server server]
   (.stop server))
 
-(defn prod-config []
+(defn config []
   {:s3/client         {:region (System/getenv "S3_REGION")}
    :s3/sandboxes      {:client (ig/ref :s3/client)
                        :bucket (System/getenv "S3_BUCKET")}
@@ -185,7 +184,7 @@
 
 (defn -main [& _]
   (try
-    (let [system (ig/init (prod-config))
+    (let [system (ig/init (config))
           latch  (CountDownLatch. 1)]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (.countDown latch))))
       (.await latch)

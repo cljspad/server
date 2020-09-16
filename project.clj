@@ -11,4 +11,5 @@
   :main cljsfiddle.server
   :source-paths ["src"]
   :resource-paths ["resources"]
-  :profiles {:dev {:source-paths ["src" "dev-src"]}})
+  :profiles {:uberjar {:aot :all}
+             :dev     {:source-paths ["src" "dev-src"]}})
