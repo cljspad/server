@@ -4,7 +4,7 @@ The server that hosts [cljsfiddle](https://github.com/cljsfiddle/cljsfiddle)
 
 ## Running locally 
 
-### 1) Compile and cljsfiddle UI code 
+### 1) Compile and watch cljsfiddle UI code 
 
 ```bash
 git clone git@github.com:cljsfiddle/cljsfiddle.git
