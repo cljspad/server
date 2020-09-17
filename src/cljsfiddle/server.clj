@@ -120,7 +120,7 @@
   (s3-handler ctx (-> req
                       (assoc-in [:path-params :version] latest-sandbox)
                       (update :uri #(str "/sandbox/" latest-sandbox
-                                         (if (str/blank? %)
+                                         (if (or (str/blank? %) (= "/" %))
                                            "/index.html"
                                            %))))))
 
