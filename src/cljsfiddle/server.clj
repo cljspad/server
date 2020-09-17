@@ -25,8 +25,9 @@
               :read-file (memoize read-file)}]))
 
 (defn sandboxes [client bucket]
-  (->> (aws/invoke client {:op      :ListObjectsV2
-                           :request {:Bucket bucket}})
+  (->> {:op      :ListObjectsV2
+        :request {:Bucket bucket}}
+       (aws/invoke client)
        :Contents
        (map :Key)
        (filter #(str/ends-with? % "/"))
@@ -94,7 +95,8 @@
 (defmethod rpc :default [_ _]
   {:status 404})
 
-(defmethod rpc :env/load [{:keys [sandboxes]} {:keys [sandbox/version opts]}]
+(defmethod rpc :env/load
+  [{:keys [sandboxes]} {:keys [sandbox/version opts]}]
   (if-let [resp (load-source sandboxes version opts)]
     {:status  200
      :body    (pr-str resp)
@@ -117,8 +119,7 @@
   [{:keys [latest-sandbox] :as ctx} req]
   (s3-handler ctx (-> req
                       (assoc-in [:path-params :version] latest-sandbox)
-                      (update :uri #(str "/sandbox/"
-                                         latest-sandbox
+                      (update :uri #(str "/sandbox/" latest-sandbox
                                          (if (str/blank? %)
                                            "/index.html"
                                            %))))))
@@ -127,7 +128,8 @@
   [ctx req]
   (s3-handler-latest ctx (update req :uri str "/index.html")))
 
-(defn routes [ctx]
+(defn routes
+  [ctx]
   [["/api/:version/rpc" {:post {:handler #(rpc ctx (-> % :body slurp edn/read-string))}}]
    ["/sandbox/:version" {:get {:handler (partial s3-handler-latest-index ctx)}}]
    ["/sandbox/:version/*" {:get {:handler (partial s3-handler ctx)}}]])
