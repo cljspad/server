@@ -2,7 +2,8 @@
   (:require [cljsfiddle.server]
             [clojure.string :as str]
             [integrant.core :as ig]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [ring.util.mime-type :as mime])
   (:import (java.io File)))
 
 (defonce system
@@ -13,7 +14,9 @@
   (let [read-file (fn [file]
                     (let [file (apply io/file path "resources" "public" (str/split file #"/"))]
                       (when (.exists ^File file)
-                        {:Body (slurp file)})))
+                        {:Body          (slurp file)
+                         :ContentType   (mime/ext-mime-type (str file))
+                         :ContentLength (str (.length file))})))
         read-src  (comp :Body read-file)]
     {"dev" {:read-file read-file
             :read-src  read-src}}))

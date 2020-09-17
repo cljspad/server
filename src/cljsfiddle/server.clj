@@ -11,7 +11,7 @@
            (org.eclipse.jetty.server.handler.gzip GzipHandler))
   (:gen-class))
 
-(defn read-file [client bucket sandbox file]
+(defn read-s3-file [client bucket sandbox file]
   (let [resp (aws/invoke client {:op      :GetObject
                                  :request {:Bucket bucket
                                            :Key    (str sandbox "/" file)}})]
@@ -19,7 +19,7 @@
       (update resp :Body slurp))))
 
 (defn ->sandbox [client bucket sandbox]
-  (let [read-file (partial read-file client bucket sandbox)
+  (let [read-file (partial read-s3-file client bucket sandbox)
         read-src  (comp :Body read-file)]
     [sandbox {:read-src  (memoize read-src)
               :read-file (memoize read-file)}]))
@@ -115,21 +115,29 @@
 
 (defn s3-handler-latest
   [{:keys [latest-sandbox] :as ctx} req]
-  (s3-handler ctx (assoc-in req [:path-params :version] latest-sandbox)))
+  (s3-handler ctx (-> req
+                      (assoc-in [:path-params :version] latest-sandbox)
+                      (update :uri #(str "/sandbox/"
+                                         latest-sandbox
+                                         (if (str/blank? %)
+                                           "/index.html"
+                                           %))))))
 
 (defn s3-handler-latest-index
   [ctx req]
   (s3-handler-latest ctx (update req :uri str "/index.html")))
 
+(defn routes [ctx]
+  [["/api/:version/rpc" {:post {:handler #(rpc ctx (-> % :body slurp edn/read-string))}}]
+   ["/sandbox/:version" {:get {:handler (partial s3-handler-latest-index ctx)}}]
+   ["/sandbox/:version/*" {:get {:handler (partial s3-handler ctx)}}]])
+
 (defn handler
   [ctx]
   (ring/ring-handler
-   (ring/router
-    [["/api/:version/rpc" {:post {:handler #(rpc ctx (-> % :body slurp edn/read-string))}}]
-     ["/sandbox/:version" {:get {:handler (partial s3-handler-latest-index ctx)}}]
-     ["/sandbox/:version/*" {:get {:handler (partial s3-handler ctx)}}]
-     ;["/*" {:get {:handler (partial s3-handler-latest ctx)}}]
-     ])))
+   (ring/router (routes ctx))
+   (ring/routes (partial s3-handler-latest ctx)
+                (ring/create-default-handler))))
 
 (defmethod ig/init-key :s3/client
   [_ {:keys [region]}]
