@@ -82,13 +82,12 @@
       (if macros
         (or (read-js (str "cljsfiddle/" entry ".js"))
             (read-clj (str "cljsfiddle/" entry ".cljc")))
-        (or (read-clj (str "cljsfiddle/" entry ".cljs"))
+        (or (read-js (str "cljsfiddle/" entry ".js"))
+            (read-clj (str "cljsfiddle/" entry ".cljs"))
             (read-clj (str "cljsfiddle/" entry ".cljc"))
-            (read-js (str "cljsfiddle/" entry ".js"))
-            (read-js (str entry ".js"))
-            (read-js (str (unpack-goog-require1 name) ".js"))
-            (read-js (str (unpack-goog-require2 name) ".js"))
-            (read-js (str (unpack-goog-require3 name) ".js")))))))
+            (read-js (str "cljsfiddle/" (unpack-goog-require1 name) ".js"))
+            (read-js (str "cljsfiddle/" (unpack-goog-require2 name) ".js"))
+            (read-js (str "cljsfiddle/" (unpack-goog-require3 name) ".js")))))))
 
 (defmulti rpc (fn [_ctx req] (:request req)))
 
@@ -173,7 +172,8 @@
 
 (defmethod ig/init-key :ring/server
   [_ {:keys [handler port]}]
-  (jetty/run-jetty (wrap-defaults handler {})
+  ;; TODO: set security defaults once CSRF token injection added to index.html
+  (jetty/run-jetty (wrap-defaults handler {:security nil})
                    {:port         port
                     :join?        false
                     :configurator jetty-configurator}))
