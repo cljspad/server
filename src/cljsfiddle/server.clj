@@ -73,18 +73,29 @@
     {:source src
      :lang   :js}))
 
+;; TODO: remove all special cases...
+(def special-cases
+  #{'cljs.core.async.impl.ioc-helpers
+    'cljs.core.async})
+
 (defn load-source
   [sandboxes version {:keys [name macros] :as opts}]
   (when-let [sandbox (get sandboxes version)]
     (let [entry    (sym->classpath name)
           read-js  (partial read-js sandbox)
           read-clj (partial read-clj sandbox opts)]
-      (if macros
+      (cond
+        (special-cases name)
+        (read-js (str "cljsfiddle/" entry ".js"))
+
+        macros
         (or (read-js (str "cljsfiddle/" entry ".js"))
             (read-clj (str "cljsfiddle/" entry ".cljc")))
-        (or (read-js (str "cljsfiddle/" entry ".js"))
-            (read-clj (str "cljsfiddle/" entry ".cljs"))
+
+        :else
+        (or (read-clj (str "cljsfiddle/" entry ".cljs"))
             (read-clj (str "cljsfiddle/" entry ".cljc"))
+            (read-js (str "cljsfiddle/" entry ".js"))
             (read-js (str "cljsfiddle/" (unpack-goog-require1 name) ".js"))
             (read-js (str "cljsfiddle/" (unpack-goog-require2 name) ".js"))
             (read-js (str "cljsfiddle/" (unpack-goog-require3 name) ".js")))))))
