@@ -201,13 +201,11 @@
   {:s3/client         {:region (System/getenv "S3_REGION")}
    :s3/sandboxes      {:client (ig/ref :s3/client)
                        :bucket (System/getenv "S3_BUCKET")}
-   :github/gist       {:client-id     (System/getenv "GITHUB_CLIENT_ID")
-                       :client-secret (System/getenv "GITHUB_CLIENT_SECRET")}
    :s3/sandbox-latest {:sandboxes (ig/ref :s3/sandboxes)}
    :ring/handler      {:ctx {:sandboxes      (ig/ref :s3/sandboxes)
                              :latest-sandbox (ig/ref :s3/sandbox-latest)}}
    :ring/server       {:handler (ig/ref :ring/handler)
-                       :port    (System/getenv "PORT")}})
+                       :port    (Long/parseLong (System/getenv "PORT"))}})
 
 (defn -main [& _]
   (try
