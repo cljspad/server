@@ -12,8 +12,8 @@
 (defmethod ig/init-key :dev/sandboxes
   [_ {:keys [path]}]
   (let [read-file (fn [file]
-                    (let [file (apply io/file path "resources" "public" (str/split file #"/"))]
-                      (when (.exists ^File file)
+                    (let [file ^File (apply io/file path "resources" "public" (str/split file #"/"))]
+                      (when (and (.exists file) (not (.isDirectory file)))
                         {:Body          (slurp file)
                          :ContentType   (mime/ext-mime-type (str file))
                          :ContentLength (str (.length file))})))

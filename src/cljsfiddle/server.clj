@@ -5,7 +5,8 @@
             [ring.middleware.defaults :refer [wrap-defaults]]
             [reitit.ring :as ring]
             [cognitect.aws.client.api :as aws]
-            [integrant.core :as ig])
+            [integrant.core :as ig]
+            [ring.util.response :as resp])
   (:import (java.util.concurrent CountDownLatch)
            (org.eclipse.jetty.server Server)
            (org.eclipse.jetty.server.handler.gzip GzipHandler))
@@ -136,19 +137,22 @@
 
 (defn s3-handler-latest-index
   [ctx req]
-  (s3-handler-latest ctx (update req :uri str "/index.html")))
+  (s3-handler-latest ctx (assoc req :uri "/index.html")))
 
 (defn routes
   [ctx]
   [["/api/:version/rpc" {:post {:handler #(rpc ctx (-> % :body slurp edn/read-string))}}]
-   ["/sandbox/:version" {:get {:handler (partial s3-handler-latest-index ctx)}}]
+   ["/gist/:version/:id" {:get {:handler #(s3-handler ctx (assoc % :uri "/index.html"))}}]
+   ["/gist/:id" {:get {:handler (partial s3-handler-latest-index ctx)}}]
+   ["/sandbox/:version" {:get {:handler #(resp/redirect (str (:uri %) "/index.html"))}}]
    ["/sandbox/:version/*" {:get {:handler (partial s3-handler ctx)}}]])
 
 (defn handler
   [ctx]
   (ring/ring-handler
    (ring/router (routes ctx))
-   (ring/routes (partial s3-handler-latest ctx)
+   (ring/routes (ring/redirect-trailing-slash-handler {:method :strip})
+                (partial s3-handler-latest ctx)
                 (ring/create-default-handler))))
 
 (defmethod ig/init-key :s3/client
@@ -197,6 +201,8 @@
   {:s3/client         {:region (System/getenv "S3_REGION")}
    :s3/sandboxes      {:client (ig/ref :s3/client)
                        :bucket (System/getenv "S3_BUCKET")}
+   :github/gist       {:client-id     (System/getenv "GITHUB_CLIENT_ID")
+                       :client-secret (System/getenv "GITHUB_CLIENT_SECRET")}
    :s3/sandbox-latest {:sandboxes (ig/ref :s3/sandboxes)}
    :ring/handler      {:ctx {:sandboxes      (ig/ref :s3/sandboxes)
                              :latest-sandbox (ig/ref :s3/sandbox-latest)}}
