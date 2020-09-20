@@ -27,11 +27,11 @@
 
 (defn sandboxes [client bucket]
   (->> {:op      :ListObjectsV2
-        :request {:Bucket bucket}}
+        :request {:Bucket    bucket
+                  :Delimiter "/"}}
        (aws/invoke client)
-       :Contents
-       (map :Key)
-       (filter #(str/ends-with? % "/"))
+       :CommonPrefixes
+       (map :Prefix)
        (map #(str/replace % "/" ""))
        (map (partial ->sandbox client bucket))
        (into {})))
@@ -121,10 +121,17 @@
       (when-let [resp (read-file (subs (:uri req) (count (str "/sandbox/" version "/"))))]
         {:status  200
          :body    (:Body resp)
-         :headers {"Content-Type"   (:ContentType resp)
-                   "Content-Length" (:ContentLength resp)
-                   "Last-Modified"  (:LastModified resp)
-                   "ETag"           (:Etag resp)}}))))
+         :headers (->> {"Content-Type"   (when-let [content-type (:ContentType resp)]
+                                           (str content-type))
+                        "Content-Length" (when-let [content-length (:ConentLength resp)]
+                                           (when (pos? content-length)
+                                             (str content-length)))
+                        "Last-Modified"  (when-let [last-modified (:LastModified resp)]
+                                           (str last-modified))
+                        "ETag"           (when-let [etag (:Etag resp)]
+                                           (str etag))}
+                       (filter (fn [[_ v]] (some? v)))
+                       (into {}))}))))
 
 (defn s3-handler-latest
   [{:keys [latest-sandbox] :as ctx} req]

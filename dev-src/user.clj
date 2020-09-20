@@ -16,7 +16,7 @@
                       (when (and (.exists file) (not (.isDirectory file)))
                         {:Body          (slurp file)
                          :ContentType   (mime/ext-mime-type (str file))
-                         :ContentLength (str (.length file))})))
+                         :ContentLength (.length file)})))
         read-src  (comp :Body read-file)]
     {"dev" {:read-file read-file
             :read-src  read-src}}))
