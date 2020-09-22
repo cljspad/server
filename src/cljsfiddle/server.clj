@@ -53,7 +53,7 @@
 
 (defn unpack-goog-require3 [s]
   (let [[x y & xs] (str/split (str s) #"\.")]
-    (sym->classpath (str/join "." (into [x (str/lower-case y) (str/lower-case y)] (map str/lower-case xs))))))
+    (sym->classpath (str/join "." (into [x (some-> y str/lower-case)] (map str/lower-case xs))))))
 
 (defn try-read-cache
   [{:keys [read-src]} name]
@@ -99,7 +99,9 @@
             (read-js (str "cljsfiddle/" entry ".js"))
             (read-js (str "cljsfiddle/" (unpack-goog-require1 name) ".js"))
             (read-js (str "cljsfiddle/" (unpack-goog-require2 name) ".js"))
-            (read-js (str "cljsfiddle/" (unpack-goog-require3 name) ".js")))))))
+            (read-js (str "cljsfiddle/" (unpack-goog-require3 name) ".js"))
+            {:source (format "require('%s');" name)
+             :lang   :js})))))
 
 (defmulti rpc (fn [_ctx req] (:request req)))
 
