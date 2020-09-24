@@ -16,10 +16,8 @@
                       (when (and (.exists file) (not (.isDirectory file)))
                         {:Body          (slurp file)
                          :ContentType   (mime/ext-mime-type (str file))
-                         :ContentLength (.length file)})))
-        read-src  (comp :Body read-file)]
-    {"dev" {:read-file read-file
-            :read-src  read-src}}))
+                         :ContentLength (.length file)})))]
+    {"dev" {:read-file read-file}}))
 
 (defn config [cljsfiddle-path]
   {:dev/sandboxes {:path cljsfiddle-path}
