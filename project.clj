@@ -8,7 +8,9 @@
                  [com.cognitect.aws/endpoints "1.1.11.842"]
                  [com.cognitect.aws/s3 "809.2.734.0"]
                  [integrant "0.8.0"]
-                 [clj-http "3.10.2"]]
+                 [selmer "1.12.28"]
+                 [cheshire "5.10.0"]
+                 [clj-http "3.10.3"]]
   :main cljsfiddle.server
   :source-paths ["src"]
   :resource-paths ["resources"]
