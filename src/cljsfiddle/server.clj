@@ -8,7 +8,8 @@
             [selmer.parser :as selmer]
             [ring.util.anti-forgery :as anti-forgery]
             [clj-http.client :as http]
-            [clojure.core.memoize :as memo])
+            [clojure.core.memoize :as memo]
+            [clojure.java.io :as io])
   (:import (java.util.concurrent CountDownLatch)
            (org.eclipse.jetty.server Server)
            (org.eclipse.jetty.server.handler.gzip GzipHandler))
@@ -59,16 +60,34 @@
   [{:keys [latest-sandbox sandboxes]} req]
   (let [version (get-in req [:path-params :version] latest-sandbox)]
     (when-let [read-file (get-in sandboxes [version :read-file])]
-      (let [gist-id (get-in req [:path-params :gist-id])
-            index   (read-file "index.html")
-            opts    {:sandbox-version version
-                     :opts            (cond-> {:latest latest-sandbox}
-                                        gist-id (assoc :gist_id gist-id))
-                     :anti-forgery    (anti-forgery/anti-forgery-field)}
-            body    (selmer/render (:Body index) opts)]
+      (let [gist-id    (get-in req [:path-params :gist-id])
+            extra-opts (:cljsfiddle/opts req)
+            index      (read-file "index.html")
+            opts       {:sandbox-version version
+                        :opts            (cond-> {:latest latest-sandbox}
+                                           gist-id (assoc :gist_id gist-id)
+                                           extra-opts (merge extra-opts))
+                        :anti-forgery    (anti-forgery/anti-forgery-field)}
+            body       (selmer/render (:Body index) opts)]
         {:status  200
          :body    body
          :headers {"Content-Type" "text/html"}}))))
+
+(defn embed-index-html
+  [ctx req]
+  (let [selected-tab (get-in req [:query-params "selected_tab"] "editor")
+        defer-load?  (case (get-in req [:query-params "defer_load"] "true")
+                       "true" true
+                       "false" false
+                       true)
+        opts         {:embed true :selected_tab selected-tab}]
+    (if defer-load?
+      {:status  200
+       :body    (selmer/render (slurp (io/resource "index.html"))
+                               {:href (str (:uri req) "?defer_load=false")})
+       :headers {"Content-Type" "text/html"}}
+
+      (index-html ctx (assoc req :cljsfiddle/opts opts)))))
 
 (defn fetch-gist
   [{:keys [client-id client-secret]} gist-id]
@@ -111,8 +130,10 @@
   [ctx]
   [["/" {:get {:handler (partial index-html ctx)}}]
    ["/api/v1/gist/:gist-id" {:get {:handler (partial load-gist ctx)}}]
-   ["/gist/:version/:gist-id" {:get {:handler (partial index-html ctx)}}]
    ["/gist/:gist-id" {:get {:handler (partial index-html ctx)}}]
+   ["/gist/:version/:gist-id" {:get {:handler (partial index-html ctx)}}]
+   ["/embed/:gist-id" {:get {:handler (partial embed-index-html ctx)}}]
+   ["/embed/:version/:gist-id" {:get {:handler (partial embed-index-html ctx)}}]
    ["/sandbox/:version" {:get {:handler (partial index-html ctx)}}]
    ["/sandbox/:version/*" {:get {:handler (partial s3-handler ctx)}}]])
 
@@ -153,10 +174,13 @@
                         (.setHandler (.getHandler server)))]
     (.setHandler server gzip-handler)))
 
+(def site-opts
+  (assoc-in defaults/site-defaults [:security :frame-options] nil))
+
 (defmethod ig/init-key :ring/server
   [_ {:keys [handler port]}]
   (jetty/run-jetty
-   (defaults/wrap-defaults handler defaults/site-defaults)
+   (defaults/wrap-defaults handler site-opts)
    {:port         port
     :join?        false
     :configurator jetty-configurator}))
