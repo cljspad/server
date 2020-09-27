@@ -11,6 +11,7 @@
             [clojure.core.memoize :as memo]
             [clojure.java.io :as io])
   (:import (java.util.concurrent CountDownLatch)
+           (java.io BufferedInputStream)
            (org.eclipse.jetty.server Server)
            (org.eclipse.jetty.server.handler.gzip GzipHandler))
   (:gen-class))
@@ -20,7 +21,8 @@
                                  :request {:Bucket bucket
                                            :Key    (str sandbox "/" file)}})]
     (when-not (:cognitect.anomalies/category resp)
-      resp)))
+      (update resp :Body (fn [^BufferedInputStream is]
+                           (.readAllBytes is))))))
 
 (defn ->sandbox [client bucket sandbox]
   (let [read-file (partial read-s3-file client bucket sandbox)]
