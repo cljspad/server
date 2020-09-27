@@ -20,7 +20,7 @@
                                  :request {:Bucket bucket
                                            :Key    (str sandbox "/" file)}})]
     (when-not (:cognitect.anomalies/category resp)
-      (update resp :Body slurp))))
+      resp)))
 
 (defn ->sandbox [client bucket sandbox]
   (let [read-file (partial read-s3-file client bucket sandbox)]
@@ -37,24 +37,27 @@
        (map (partial ->sandbox client bucket))
        (into {})))
 
+(defn s3-resp->ring-resp [resp]
+  {:status  200
+   :body    (:Body resp)
+   :headers (->> {"Content-Type"   (when-let [content-type (:ContentType resp)]
+                                     (str content-type))
+                  "Content-Length" (when-let [content-length (:ConentLength resp)]
+                                     (when (pos? content-length)
+                                       (str content-length)))
+                  "Last-Modified"  (when-let [last-modified (:LastModified resp)]
+                                     (str last-modified))
+                  "ETag"           (when-let [etag (:Etag resp)]
+                                     (str etag))}
+                 (filter (fn [[_ v]] (some? v)))
+                 (into {}))})
+
 (defn s3-handler
   [{:keys [sandboxes]} req]
   (when-let [version (get-in req [:path-params :version])]
     (when-let [read-file (get-in sandboxes [version :read-file])]
       (when-let [resp (read-file (subs (:uri req) (count (str "/sandbox/" version "/"))))]
-        {:status  200
-         :body    (:Body resp)
-         :headers (->> {"Content-Type"   (when-let [content-type (:ContentType resp)]
-                                           (str content-type))
-                        "Content-Length" (when-let [content-length (:ConentLength resp)]
-                                           (when (pos? content-length)
-                                             (str content-length)))
-                        "Last-Modified"  (when-let [last-modified (:LastModified resp)]
-                                           (str last-modified))
-                        "ETag"           (when-let [etag (:Etag resp)]
-                                           (str etag))}
-                       (filter (fn [[_ v]] (some? v)))
-                       (into {}))}))))
+        (s3-resp->ring-resp resp)))))
 
 (defn index-html
   [{:keys [latest-sandbox sandboxes]} req]
@@ -68,10 +71,14 @@
                                            gist-id (assoc :gist_id gist-id)
                                            extra-opts (merge extra-opts))
                         :anti-forgery    (anti-forgery/anti-forgery-field)}
-            body       (selmer/render (:Body index) opts)]
+            body       (selmer/render (slurp (:Body index)) opts)]
         {:status  200
          :body    body
          :headers {"Content-Type" "text/html"}}))))
+
+(def embed-html
+  (delay
+   (slurp (io/resource "embed.html"))))
 
 (defn embed-index-html
   [ctx req]
@@ -80,11 +87,13 @@
                        "true" true
                        "false" false
                        true)
-        opts         {:embed true :selected_tab selected-tab}]
+        opts         {:embed true :selected_tab selected-tab}
+        href         (if (empty? (:query-params req))
+                       (str (:uri req) "?defer_load=false")
+                       (str (:uri req) "&defer_load=false"))]
     (if defer-load?
       {:status  200
-       :body    (selmer/render (slurp (io/resource "index.html"))
-                               {:href (str (:uri req) "?defer_load=false")})
+       :body    (selmer/render @embed-html {:href href})
        :headers {"Content-Type" "text/html"}}
 
       (index-html ctx (assoc req :cljsfiddle/opts opts)))))
@@ -137,12 +146,22 @@
    ["/sandbox/:version" {:get {:handler (partial index-html ctx)}}]
    ["/sandbox/:version/*" {:get {:handler (partial s3-handler ctx)}}]])
 
+(def not-found
+  (constantly {:status 404 :body "" :headers {}}))
+
+(defn wrap-s3-latest
+  [{:keys [sandboxes latest-sandbox]} req]
+  (when-let [read-file (get-in sandboxes [latest-sandbox :read-file])]
+    (when-let [resp (read-file (:uri req))]
+      (s3-resp->ring-resp resp))))
+
 (defn handler
   [ctx]
   (ring/ring-handler
    (ring/router (routes ctx))
    (ring/routes (ring/redirect-trailing-slash-handler {:method :strip})
-                (ring/create-default-handler))))
+                (partial wrap-s3-latest ctx)
+                (ring/create-default-handler {:not-acceptable not-found}))))
 
 (defmethod ig/init-key :s3/client
   [_ {:keys [region]}]

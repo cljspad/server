@@ -14,7 +14,7 @@
   (let [read-file (fn [file]
                     (let [file ^File (apply io/file path "resources" "public" (str/split file #"/"))]
                       (when (and (.exists file) (not (.isDirectory file)))
-                        {:Body          (slurp file)
+                        {:Body          file
                          :ContentType   (mime/ext-mime-type (str file))
                          :ContentLength (.length file)})))]
     {"dev" {:read-file read-file}}))
