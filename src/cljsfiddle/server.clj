@@ -154,7 +154,7 @@
 (defn wrap-s3-latest
   [{:keys [sandboxes latest-sandbox]} req]
   (when-let [read-file (get-in sandboxes [latest-sandbox :read-file])]
-    (when-let [resp (read-file (:uri req))]
+    (when-let [resp (read-file (subs (:uri req) 1))]
       (s3-resp->ring-resp resp))))
 
 (defn handler
