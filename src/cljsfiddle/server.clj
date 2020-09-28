@@ -66,10 +66,12 @@
   (let [version (get-in req [:path-params :version] latest-sandbox)]
     (when-let [read-file (get-in sandboxes [version :read-file])]
       (let [gist-id    (get-in req [:path-params :gist-id])
+            snippet-id (get-in req [:path-params :snippet-id])
             extra-opts (:cljsfiddle/opts req)
             index      (read-file "index.html")
             opts       {:sandbox-version version
                         :opts            (cond-> {:latest latest-sandbox}
+                                           snippet-id (assoc :snippet_id snippet-id)
                                            gist-id (assoc :gist_id gist-id)
                                            extra-opts (merge extra-opts))
                         :anti-forgery    (anti-forgery/anti-forgery-field)}
@@ -109,7 +111,7 @@
               (and client-id client-secret)
               (assoc :basic-auth [client-id client-secret]))))
 
-(defn fetch-gist-raw-url [url]
+(defn fetch-raw-gist-url [url]
   (let [resp (http/get url {:throw-exceptions false :timeout 10})]
     (when (= 200 (:status resp))
       (:body resp))))
@@ -129,7 +131,7 @@
                                   (-> resp :body :files))
                             (-> resp :body :files first second))]
           (when-let [source (if (:truncated file)
-                              (fetch-gist-raw-url (:raw_url file))
+                              (fetch-raw-gist-url (:raw_url file))
                               (:content file))]
             {:status  200
              :body    source
@@ -137,14 +139,36 @@
 
         {:status (:status resp)}))))
 
+(defn fetch-raw-snippet-url
+  [{:keys [private-token]} url]
+  (http/get url {:throw-exceptions false
+                 :timeout 10
+                 :headers {"PRIVATE-TOKEN" private-token}}))
+
+(defn load-snippet
+  [{:keys [gitlab]} req]
+  (when-let [snippet-id (get-in req [:path-params :snippet-id])]
+    (let [resp (fetch-raw-snippet-url gitlab (format "https://gitlab.com/api/v4/snippets/%s/raw" snippet-id))]
+      (if (= 200 (:status resp))
+        {:status  200
+         :body    (:body resp)
+         :headers {"Content-Type" "text/plain"}}
+
+        {:status (:status resp)}))))
+
 (defn routes
   [ctx]
   [["/" {:get {:handler (partial index-html ctx)}}]
    ["/api/v1/gist/:gist-id" {:get {:handler (partial load-gist ctx)}}]
+   ["/api/v1/gitlab/:snippet-id" {:get {:handler (partial load-snippet ctx)}}]
+   ["/gitlab/:snippet-id" {:get {:handler (partial index-html ctx)}}]
+   ["/gitlab/:version/:snippet-id" {:get {:handler (partial index-html ctx)}}]
    ["/gist/:gist-id" {:get {:handler (partial index-html ctx)}}]
    ["/gist/:version/:gist-id" {:get {:handler (partial index-html ctx)}}]
-   ["/embed/:gist-id" {:get {:handler (partial embed-index-html ctx)}}]
-   ["/embed/:version/:gist-id" {:get {:handler (partial embed-index-html ctx)}}]
+   ["/embed/gitlab/:snippet-id" {:get {:handler (partial embed-index-html ctx)}}]
+   ["/embed/:version/gitlab/:snippet-id" {:get {:handler (partial embed-index-html ctx)}}]
+   ["/embed/gist/:gist-id" {:get {:handler (partial embed-index-html ctx)}}]
+   ["/embed/:version/gist/:gist-id" {:get {:handler (partial embed-index-html ctx)}}]
    ["/sandbox/:version" {:get {:handler (partial index-html ctx)}}]
    ["/sandbox/:version/*" {:get {:handler (partial s3-handler ctx)}}]])
 
@@ -217,6 +241,7 @@
    :s3/sandbox-latest {:sandboxes (ig/ref :s3/sandboxes)}
    :ring/handler      {:ctx {:sandboxes      (ig/ref :s3/sandboxes)
                              :latest-sandbox (ig/ref :s3/sandbox-latest)
+                             :gitlab         {:private-token (System/getenv "GITLAB_PRIVATE_TOKEN")}
                              :github         {:client-id     (System/getenv "GITHUB_CLIENT_ID")
                                               :client-secret (System/getenv "GITHUB_CLIENT_SECRET")}}}
    :ring/server       {:handler (ig/ref :ring/handler)
