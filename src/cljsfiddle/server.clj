@@ -156,9 +156,16 @@
 
         {:status (:status resp)}))))
 
+(defn load-share-code
+  [ctx req]
+  (let [opts {:share_code (get-in req [:query-params "c"])}]
+    (index-html ctx (assoc req :cljsfiddle/opts opts))))
+
 (defn routes
   [ctx]
   [["/" {:get {:handler (partial index-html ctx)}}]
+   ["/share/:version" {:get {:handler (partial load-share-code ctx)}}]
+   ["/share" {:get {:handler (partial load-share-code ctx)}}]
    ["/api/v1/gist/:gist-id" {:get {:handler (partial load-gist ctx)}}]
    ["/api/v1/gitlab/:snippet-id" {:get {:handler (partial load-snippet ctx)}}]
    ["/gitlab/:snippet-id" {:get {:handler (partial index-html ctx)}}]
