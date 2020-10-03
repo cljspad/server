@@ -4,17 +4,17 @@ ADD https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein /bin
 RUN chmod +x /bin/lein
 RUN lein version
 
-WORKDIR /usr/src/cljsfiddle
-COPY project.clj /usr/src/cljsfiddle/
+WORKDIR /usr/src/cljspad
+COPY project.clj /usr/src/cljspad/
 RUN lein deps
 
-COPY . /usr/src/cljsfiddle
+COPY . /usr/src/cljspad
 RUN lein uberjar
 
 # Application build
 
 FROM amazoncorretto:11
 
-RUN mkdir -p /opt/cljsfiddle/lib
-COPY --from=build-env /usr/src/cljsfiddle/target/*-standalone.jar /opt/cljsfiddle/lib/cljsfiddle.jar
-CMD java -XX:InitialRAMPercentage=85 -XX:MaxRAMPercentage=85 -jar /opt/cljsfiddle/lib/cljsfiddle.jar
+RUN mkdir -p /opt/cljspad/lib
+COPY --from=build-env /usr/src/cljspad/target/*-standalone.jar /opt/cljspad/lib/cljspad.jar
+CMD java -XX:InitialRAMPercentage=85 -XX:MaxRAMPercentage=85 -jar /opt/cljspad/lib/cljspad.jar

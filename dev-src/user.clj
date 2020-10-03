@@ -1,5 +1,5 @@
 (ns user
-  (:require [cljsfiddle.server]
+  (:require [cljspad.server]
             [clojure.string :as str]
             [integrant.core :as ig]
             [clojure.java.io :as io]

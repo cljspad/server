@@ -1,4 +1,4 @@
-(ns cljsfiddle.server
+(ns cljspad.server
   (:require [clojure.string :as str]
             [ring.adapter.jetty :as jetty]
             [ring.middleware.defaults :as defaults]
@@ -66,7 +66,7 @@
     (when-let [read-file (get-in sandboxes [version :read-file])]
       (let [gist-id    (get-in req [:path-params :gist-id])
             snippet-id (get-in req [:path-params :snippet-id])
-            extra-opts (:cljsfiddle/opts req)
+            extra-opts (:cljspad/opts req)
             index      (read-file "index.html")
             opts       {:sandbox-version version
                         :opts            (cond-> {:latest latest-sandbox}
@@ -99,7 +99,7 @@
        :body    (selmer/render @embed-html {:href href})
        :headers {"Content-Type" "text/html"}}
 
-      (index-html ctx (assoc req :cljsfiddle/opts opts)))))
+      (index-html ctx (assoc req :cljspad/opts opts)))))
 
 (defn fetch-gist
   [{:keys [client-id client-secret]} gist-id]
@@ -141,8 +141,8 @@
 (defn fetch-raw-snippet-url
   [{:keys [private-token]} url]
   (http/get url {:throw-exceptions false
-                 :timeout 10
-                 :headers {"PRIVATE-TOKEN" private-token}}))
+                 :timeout          10
+                 :headers          {"PRIVATE-TOKEN" private-token}}))
 
 (defn load-snippet
   [{:keys [gitlab]} req]
@@ -158,7 +158,7 @@
 (defn load-share-code
   [ctx req]
   (let [opts {:share_code (get-in req [:query-params "c"])}]
-    (index-html ctx (assoc req :cljsfiddle/opts opts))))
+    (index-html ctx (assoc req :cljspad/opts opts))))
 
 (defn routes
   [ctx]

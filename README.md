@@ -1,23 +1,23 @@
-# cljsfiddle server
+# cljspad server
 
-The server that hosts [cljsfiddle](https://github.com/cljsfiddle/cljsfiddle)
+The server that hosts [cljspad](https://github.com/cljspad/cljspad)
 
 ## Running locally 
 
-### 1) Compile and watch cljsfiddle UI code 
+### 1) Compile and watch cljspad UI code 
 
 ```
-git clone git@github.com:cljsfiddle/cljsfiddle.git
-cd cljsfiddle
+git clone git@github.com:cljspad/cljspad.git
+cd cljspad
 ./dev.sh
 ```
 
 ### 2) Run server code
 ``` 
-git clone git@github.com:cljsfiddle/server.git
+git clone git@github.com:cljspad/server.git
 cd server
 lein repl
-;; user=> (user/start! "/path/to/cljsfiddle/ui/code")
+;; user=> (user/start! "/path/to/cljspad/ui/code")
 ```
 
 ### 3) Open UI
