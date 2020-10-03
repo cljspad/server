@@ -25,8 +25,7 @@
                            (.readAllBytes is))))))
 
 (defn ->sandbox [client bucket sandbox]
-  (let [read-file (partial read-s3-file client bucket sandbox)]
-    [sandbox {:read-file (memoize read-file)}]))
+  [sandbox {:read-file (partial read-s3-file client bucket sandbox)}])
 
 (defn sandboxes [client bucket]
   (->> {:op      :ListObjectsV2
