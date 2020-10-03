@@ -9,7 +9,7 @@ The server that hosts [cljspad](https://github.com/cljspad/cljspad)
 ```
 git clone git@github.com:cljspad/cljspad.git
 cd cljspad
-./dev.sh
+./scripts/dev.sh
 ```
 
 ### 2) Run server code
